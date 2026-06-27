@@ -1,13 +1,19 @@
 {
   "expo": {
-    "name": "ingreen-expo",
-    "slug": "ingreen-expo",
+    "name": "InGreen",
+    "slug": "thesis",
+    "owner": "pchypcy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "ingreen",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "InGreen ใช้กล้องเพื่อสแกนบาร์โค้ดสินค้าและถ่ายรูปฉลาก/ใบเสร็จ",
+        "NSPhotoLibraryUsageDescription": "InGreen ใช้คลังรูปเพื่อแนบรูปฉลาก/ใบเสร็จ"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -15,10 +21,45 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "InGreen ใช้กล้องเพื่อสแกนบาร์โค้ดสินค้าและถ่ายรูปฉลาก/ใบเสร็จ"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "InGreen ใช้คลังรูปเพื่อแนบรูปฉลาก/ใบเสร็จ",
+          "cameraPermission": "InGreen ใช้กล้องเพื่อถ่ายรูปฉลาก/ใบเสร็จ"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e1300dfc-6c8a-4cb0-af9d-b310a1c7a560"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e1300dfc-6c8a-4cb0-af9d-b310a1c7a560"
     }
   }
 }
