@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Modal, ActivityIndicator, Linking } from "react-native";
+import { View, StyleSheet, Modal, ActivityIndicator, Linking, Platform } from "react-native";
 import { Pressable } from "../components/Touchable";
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import WebScanner from '../components/WebScanner';
+
+const IS_WEB = Platform.OS === 'web';
 import axios from 'axios';
 import { Text, TextInput } from '../components/Text';
 import { Icon } from '../components/Icon';
@@ -121,11 +124,11 @@ export default function Scan() {
         if (!lockRef.current && /^\d{8,14}$/.test(code)) checkProduct(code);
     };
 
-    // ── permission states ──
-    if (!permission) {
+    // ── permission states (ข้ามบนเว็บ — WebScanner ขอสิทธิ์กล้องเองผ่านเบราว์เซอร์) ──
+    if (!IS_WEB && !permission) {
         return <View style={styles.permWrap}><ActivityIndicator color="#D5EE7A" size="large" /></View>;
     }
-    if (!permission.granted) {
+    if (!IS_WEB && !permission.granted) {
         return (
             <View style={styles.permWrap}>
                 <Icon icon="lucide:camera" width={56} color="#D5EE7A" />
@@ -143,12 +146,18 @@ export default function Scan() {
 
     return (
         <View style={styles.root}>
-            <CameraView
-                style={StyleSheet.absoluteFill}
-                facing="back"
-                onBarcodeScanned={isScanning ? undefined : onBarcodeScanned}
-                barcodeScannerSettings={{ barcodeTypes: BARCODE_TYPES }}
-            />
+            {IS_WEB ? (
+                <View style={StyleSheet.absoluteFill}>
+                    <WebScanner onScanned={(code) => { if (!isScanning) onBarcodeScanned({ data: code }); }} />
+                </View>
+            ) : (
+                <CameraView
+                    style={StyleSheet.absoluteFill}
+                    facing="back"
+                    onBarcodeScanned={isScanning ? undefined : onBarcodeScanned}
+                    barcodeScannerSettings={{ barcodeTypes: BARCODE_TYPES }}
+                />
+            )}
 
             {/* dim overlay */}
             <View pointerEvents="none" style={styles.dimAll} />
