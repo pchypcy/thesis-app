@@ -28,7 +28,8 @@ export default function Community() {
     const load = async () => {
         setLoading(true);
         try {
-            const res = await axios.get(`${API_BASE_URL}/api/products/pending/list`, { headers: H });
+            // ★ ส่ง username ไปด้วย → backend จะบอกกลับว่าเราโหวตสินค้าไหนไปแล้ว (my_vote)
+            const res = await axios.get(`${API_BASE_URL}/api/products/pending/list`, { headers: H, params: { username } });
             if (res.data?.success) {
                 setItems(res.data.items || []);
                 if (res.data.config) { setVoteCfg(res.data.config); setThreshold(res.data.config.quorum || 3); }
@@ -123,8 +124,10 @@ export default function Community() {
                         const upPct = aw > 0 ? Math.min(100, Math.round((wUp / aw) * 100)) : 0;
                         const voters = it.unique_voters ?? 0;
                         const timeLeft = fmtWindow(it.vote_window_ends_at);
-                        const isOwner = it.submitted_by === username;
-                        const alreadyVoted = it.voters?.includes(username);
+                        const isOwner = it.is_own_submission ?? (it.submitted_by === username);
+                        // ★ backend บอกมาตรงๆ ว่าเราโหวตไปแล้วไหม + โหวตทางไหน
+                        const myVote = it.my_vote || null;                  // 'up' | 'down' | null
+                        const alreadyVoted = it.has_voted || !!myVote;
                         const img = it.image_url || it.label_photo;
                         const hasDesc = it.marketing_text && !String(it.marketing_text).includes('รอตรวจสอบ');
                         const tier = it.verification_tier || 1;
@@ -185,7 +188,15 @@ export default function Community() {
                                 </View>
 
                                 {alreadyVoted ? (
-                                    <View style={[s.statusBox, { backgroundColor: '#F1F8E9' }]}><Icon icon="lucide:check-circle" width={14} color="#2D8048" /><Text style={{ fontSize: 12, color: '#2D8048', fontWeight: '800' }}>{isTH ? 'คุณโหวตสินค้านี้แล้ว' : 'You voted'}</Text></View>
+                                    // ★ โหวตแล้ว → เปลี่ยนปุ่มเป็นสถานะ พร้อมบอกว่าโหวตทางไหน
+                                    <View style={[s.statusBox, { backgroundColor: myVote === 'down' ? '#FFF1F0' : '#F1F8E9', borderWidth: 1.5, borderColor: myVote === 'down' ? '#FFCDD2' : '#C8E6C9' }]}>
+                                        <Icon icon={myVote === 'down' ? 'lucide:thumbs-down' : 'lucide:thumbs-up'} width={14} color={myVote === 'down' ? '#D14545' : '#2D8048'} />
+                                        <Text style={{ fontSize: 12, color: myVote === 'down' ? '#D14545' : '#2D8048', fontWeight: '800' }}>
+                                            {isTH
+                                                ? (myVote === 'down' ? 'คุณโหวตแล้ว — ไม่ถูกต้อง' : myVote === 'up' ? 'คุณโหวตแล้ว — ยืนยันถูกต้อง' : 'คุณโหวตสินค้านี้แล้ว')
+                                                : (myVote === 'down' ? 'You voted — Inaccurate' : myVote === 'up' ? 'You voted — Confirmed' : 'You voted')}
+                                        </Text>
+                                    </View>
                                 ) : isOwner ? (
                                     <View style={[s.statusBox, { backgroundColor: '#FFF8E1' }]}><Text style={{ fontSize: 12, color: '#E65100', fontWeight: '800' }}>{isTH ? 'ไม่สามารถโหวตสินค้าที่ตนเองเพิ่ม' : "Can't vote your own"}</Text></View>
                                 ) : (

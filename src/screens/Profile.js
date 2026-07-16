@@ -22,6 +22,7 @@ export default function Profile() {
     const [user, setUser] = useState({ username: storage.getItem('username') || 'Loading...', points: 0, persona: storage.getItem('persona') || 'Member' });
     const [vipStatus, setVipStatus] = useState(null);
     const [showUpgradeSheet, setShowUpgradeSheet] = useState(false);
+    const [nowTs, setNowTs] = useState(Date.now());   // ★ ใช้ทำนาฬิกานับถอยหลังสิทธิ์ VIP
     const [allergyCount, setAllergyCount] = useState(0);
     const [monthlySummary, setMonthlySummary] = useState(null);
     const [pendingConfirmCount, setPendingConfirmCount] = useState(0);
@@ -48,6 +49,13 @@ export default function Profile() {
         axios.get(`${API_BASE_URL}/api/health-report/${username}`, { headers: H }).then((res) => { if (res.data?.success) setMonthlySummary(res.data.report); }).catch(() => {});
     }, [vipStatus?.isVip]);
 
+    // ★ เดินนาฬิกานับถอยหลังสิทธิ์ VIP (เฉพาะตอนยังมีสิทธิ์อยู่ — ไม่มีสิทธิ์ก็ไม่ต้องเปลือง)
+    useEffect(() => {
+        if (!vipStatus?.isVip) return;
+        const t = setInterval(() => setNowTs(Date.now()), 1000);
+        return () => clearInterval(t);
+    }, [vipStatus?.isVip]);
+
     const handleSheetUpgrade = async () => {
         const username = storage.getItem('username');
         try {
@@ -72,28 +80,86 @@ export default function Profile() {
         { icon: 'lucide:help-circle', label: t.menuSupport, link: '/support' },
     ];
 
+    // ★ นับถอยหลังเวลาที่เหลือ — "1 วัน 05 ชม. 12 นาที" หรือ "05 : 12 : 33" เมื่อเหลือไม่ถึงวัน
+    const fmtCountdown = (ms) => {
+        if (!ms || ms <= 0) return 'หมดเวลาแล้ว';
+        const sec = Math.floor(ms / 1000);
+        const d = Math.floor(sec / 86400);
+        const h = Math.floor((sec % 86400) / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const ss = sec % 60;
+        const p = (n) => String(n).padStart(2, '0');
+        return d > 0 ? `${d} วัน ${p(h)} ชม. ${p(m)} นาที` : `${p(h)} : ${p(m)} : ${p(ss)}`;
+    };
+
     const VipCard = () => {
         if (!vipStatus) return null;
-        const { isVip, status, daysRemaining } = vipStatus;
+        const { isVip, status, daysRemaining, period, expiryPolicy } = vipStatus;
         if (isVip) {
             const isTrial = status === 'trial';
             const isLowDays = daysRemaining <= 5;
+            const accent = isLowDays ? '#F9A825' : '#D5EE7A';
+            const sub = isLowDays ? '#888' : 'rgba(255,255,255,0.7)';
+            const strong = isLowDays ? '#555' : '#FFFFFF';
+
+            // ช่วงเวลาสิทธิ์: trial → trialStartedAt–trialEndsAt / VIP จ่ายเงิน → startedAt–expiresAt
+            const startRaw = isTrial ? vipStatus.trialStartedAt : vipStatus.startedAt;
+            const endRaw = isTrial ? vipStatus.trialEndsAt : vipStatus.expiresAt;
+            const msLeft = endRaw ? new Date(endRaw).getTime() - nowTs : 0;
+            const total = (startRaw && endRaw) ? new Date(endRaw).getTime() - new Date(startRaw).getTime() : 0;
+            const pct = total > 0 ? Math.min(100, Math.max(0, ((nowTs - new Date(startRaw).getTime()) / total) * 100)) : 0;
+
             return (
-                <View style={[s.vipCard, isLowDays ? { backgroundColor: '#FFF8E1', borderWidth: 1.5, borderColor: '#FFE082' } : null]}>
+                <View style={[s.vipCard, { flexDirection: 'column', alignItems: 'stretch' }, isLowDays ? { backgroundColor: '#FFF8E1', borderWidth: 1.5, borderColor: '#FFE082' } : null]}>
                     {!isLowDays && <LinearGradient colors={['#1B5E37', '#2D8048']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                        <View style={[s.vipIcon, { backgroundColor: isLowDays ? '#FFF3CD' : 'rgba(204,255,0,0.15)', borderColor: isLowDays ? '#FFD54F' : 'rgba(204,255,0,0.3)' }]}>
-                            <Icon icon="mdi:crown" width={24} color={isLowDays ? '#F9A825' : '#D5EE7A'} />
+
+                    {/* แถวบน: ไอคอน + ชื่อสิทธิ์ + ปุ่ม */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                            <View style={[s.vipIcon, { backgroundColor: isLowDays ? '#FFF3CD' : 'rgba(204,255,0,0.15)', borderColor: isLowDays ? '#FFD54F' : 'rgba(204,255,0,0.3)' }]}>
+                                <Icon icon="mdi:crown" width={24} color={accent} />
+                            </View>
+                            <View>
+                                <Text style={{ fontSize: 15, fontWeight: '900', color: accent }}>{isTrial ? 'ทดลองใช้ VIP' : 'VIP สมาชิก'}</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: sub }}>{period?.type || (isTrial ? 'ทดลองใช้ฟรี 3 วัน' : 'สมาชิก 30 วัน')}</Text>
+                            </View>
                         </View>
-                        <View>
-                            <Text style={{ fontSize: 15, fontWeight: '900', color: isLowDays ? '#F9A825' : '#D5EE7A' }}>{isTrial ? 'ทดลองใช้ VIP' : 'VIP สมาชิก'}</Text>
-                            <Text style={{ fontSize: 12, fontWeight: '600', color: isLowDays ? '#888' : 'rgba(255,255,255,0.7)' }}>เหลืออีก {daysRemaining} วัน{isLowDays ? ' — ใกล้หมด!' : ''}</Text>
+                        {isLowDays ? (
+                            <Pressable onPress={() => setShowUpgradeSheet(true)} style={s.vipBtn}><Text style={{ color: '#D5EE7A', fontSize: 12, fontWeight: '800' }}>ต่ออายุ</Text></Pressable>
+                        ) : (
+                            <Pressable onPress={() => navigate('/sugar-tracker')} style={[s.vipBtn, { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(204,255,0,0.3)' }]}><Text style={{ color: '#D5EE7A', fontSize: 12, fontWeight: '800' }}>สมุดสุขภาพ</Text></Pressable>
+                        )}
+                    </View>
+
+                    {/* ★ นาฬิกานับถอยหลัง */}
+                    <View style={{ alignItems: 'center', marginTop: 15 }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '800', color: sub, letterSpacing: 1 }}>เหลือเวลาอีก</Text>
+                        <Text style={{ fontSize: 27, fontWeight: '900', color: accent, letterSpacing: 1.5, marginTop: 3 }}>{fmtCountdown(msLeft)}</Text>
+                    </View>
+
+                    {/* ★ แถบความคืบหน้า */}
+                    <View style={{ height: 6, borderRadius: 3, marginTop: 12, overflow: 'hidden', backgroundColor: isLowDays ? '#FFECB3' : 'rgba(255,255,255,0.18)' }}>
+                        <View style={{ width: `${pct}%`, height: '100%', borderRadius: 3, backgroundColor: accent }} />
+                    </View>
+
+                    {/* ★ เริ่มวันไหน / สิ้นสุดวันไหน */}
+                    <View style={{ marginTop: 13, gap: 5 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: sub }}>เริ่มใช้สิทธิ์</Text>
+                            <Text style={{ fontSize: 11.5, fontWeight: '800', color: strong }}>{period?.startedAtTH || '-'}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: sub }}>ตัดสิทธิ์</Text>
+                            <Text style={{ fontSize: 11.5, fontWeight: '900', color: accent }}>{period?.endsAtTH || '-'}</Text>
                         </View>
                     </View>
-                    {isLowDays ? (
-                        <Pressable onPress={() => setShowUpgradeSheet(true)} style={s.vipBtn}><Text style={{ color: '#D5EE7A', fontSize: 12, fontWeight: '800' }}>ต่ออายุ</Text></Pressable>
-                    ) : (
-                        <Pressable onPress={() => navigate('/sugar-tracker')} style={[s.vipBtn, { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(204,255,0,0.3)' }]}><Text style={{ color: '#D5EE7A', fontSize: 12, fontWeight: '800' }}>สมุดสุขภาพ</Text></Pressable>
+
+                    {/* ★ อธิบายกติกาการตัดสิทธิ์ */}
+                    {!!expiryPolicy && (
+                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: isLowDays ? '#FFE082' : 'rgba(255,255,255,0.15)' }}>
+                            <Icon icon="mdi:information-outline" width={13} color={sub} />
+                            <Text style={{ flex: 1, fontSize: 10.5, lineHeight: 15, fontWeight: '600', color: sub }}>{expiryPolicy}</Text>
+                        </View>
                     )}
                 </View>
             );
