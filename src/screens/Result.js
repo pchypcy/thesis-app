@@ -10,6 +10,7 @@ import { useNavigate, useLocation } from '../shims/router';
 import { API_BASE_URL } from '../config';
 import { storage } from '../utils/storage';
 import { getCurrentLang, translations } from '../utils/language';
+import { speak, stopSpeech, isSpeechSupported } from '../utils/speak';
 import AllergyAlertModal from '../components/AllergyAlertModal';
 import VIPUpgradeSheet from '../components/VIPUpgradeSheet';
 import SugarTrackerCard from '../components/SugarTrackerCard';
@@ -252,6 +253,10 @@ export default function Result() {
     const [showAllergyModal, setShowAllergyModal] = useState(false);
     const [allergyAcknowledged, setAllergyAcknowledged] = useState(false);
     const [showUpgradeSheet, setShowUpgradeSheet] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false); // ★ โหมดอ่านผลลัพธ์ออกเสียง (Inclusive Design)
+
+    // หยุดเสียงเมื่อออกจากหน้านี้ (กันเสียงเล่นค้างตอน navigate ออก)
+    useEffect(() => () => stopSpeech(), []);
 
     const H = { 'ngrok-skip-browser-warning': 'true' };
 
@@ -528,6 +533,20 @@ export default function Result() {
                             <Text style={[s.nutVal, { color: product.sodium_mg > 400 ? '#D32F2F' : '#333' }]}>{product.sodium_mg ? Math.round(product.sodium_mg * 100) / 100 : 0}mg</Text>
                         </View>
                     </View>
+                    {/* ★★ ฟีเจอร์ใหม่ #2 — แปลงแคลอรีเป็นภาพที่นึกออก: ต้องวิ่งกี่นาทีถึงเผาผลาญหมด (~10 kcal/นาที) */}
+                    {product.energy_kcal > 0 && (
+                        <View style={s.burnRow}>
+                            <View style={s.burnIcon}><Icon icon="mdi:run-fast" width={24} color="#EF6C00" /></View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={s.burnLabel}>{currentLang === 'TH' ? 'กินหมดทั้งซองนี้' : 'To burn the whole pack'}</Text>
+                                <Text style={s.burnMain}>
+                                    {currentLang === 'TH' ? 'ต้องวิ่งราว ' : 'run about '}
+                                    <Text style={s.burnHi}>{Math.max(1, Math.round(product.energy_kcal / 10))} {currentLang === 'TH' ? 'นาที' : 'min'}</Text>
+                                    {currentLang === 'TH' ? ' ถึงเผาผลาญหมด' : ''}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
                 </View>
             </View>
         );
@@ -618,8 +637,63 @@ export default function Result() {
 
     const allergyBaseSev = allergyAlert?.highestBaseSeverity || allergyAlert?.highestSeverity;
     const allergyUserSev = allergyAlert?.highestUserSeverity || null;
-    const isDangerous = allergyAlert?.hasMatch && (allergyBaseSev === 'critical' || allergyBaseSev === 'high');
-    const userSevLabelTH = { severe: 'รุนแรง', medium: 'ปานกลาง', mild: 'เล็กน้อย' };
+    // ★ Layer 1 (ระบบ) = base | Layer 2 (ผู้ใช้) = user — ต้องไม่ทิ้งเสียง user:
+    //   โชว์การ์ดเมื่อ ระบบว่าอันตราย (critical/high) "หรือ" ผู้ใช้ตั้งว่าแพ้รุนแรง
+    const isDangerous = allergyAlert?.hasMatch && (
+        allergyBaseSev === 'critical' || allergyBaseSev === 'high' || allergyUserSev === 'severe'
+    );
+
+    // ★ สีตามระดับที่ "ผู้ใช้ตั้งเอง" (Layer 2) — แดง → ส้ม → เหลือง เรียงตามความรุนแรง
+    const USER_SEV_STYLE = {
+        severe: { th: 'รุนแรง', en: 'Severe', fg: '#B71C1C', dot: '#D32F2F', bg: '#FFEBEE', border: '#EF9A9A', soft: '#FFF5F4' },
+        medium: { th: 'ปานกลาง', en: 'Medium', fg: '#D84315', dot: '#F4511E', bg: '#FFF1E8', border: '#FFAB91', soft: '#FFF8F4' },
+        mild:   { th: 'เล็กน้อย', en: 'Mild',  fg: '#F57F17', dot: '#FBC02D', bg: '#FFFDE7', border: '#FFE082', soft: '#FFFEF5' },
+    };
+    // ★ สีตามที่ "ระบบประเมิน" (Layer 1) — ใช้เมื่อผู้ใช้ยังไม่ตั้งระดับของสารนั้น
+    const BASE_SEV_STYLE = {
+        critical: { th: 'ระบบ: ร้ายแรง', en: 'System: Critical', fg: '#B71C1C', dot: '#D32F2F', bg: '#FFEBEE', border: '#EF9A9A' },
+        high:     { th: 'ระบบ: สูง',     en: 'System: High',     fg: '#B71C1C', dot: '#E53935', bg: '#FFEBEE', border: '#EF9A9A' },
+        medium:   { th: 'ระบบ: ปานกลาง', en: 'System: Medium',   fg: '#E65100', dot: '#FB8C00', bg: '#FFF3E0', border: '#FFCC80' },
+    };
+    const baseHeadColor = allergyBaseSev === 'critical' ? '#D32F2F' : allergyBaseSev === 'high' ? '#E53935' : '#FB8C00';
+    // เตือนทั้งที่ระบบไม่ได้จัดว่าอันตรายสูง → เพราะผู้ใช้ตั้งเองว่าแพ้รุนแรง
+    const allergyUserDriven = allergyAlert?.hasMatch && allergyBaseSev !== 'critical' && allergyBaseSev !== 'high' && allergyUserSev === 'severe';
+    // พื้นข้างในยึด "ระดับที่ผู้ใช้ตั้งสูงสุด" (ตามที่อาจารย์แนะนำ: หัวแดง–ข้างในเหลือง)
+    const innerBg = allergyUserSev ? USER_SEV_STYLE[allergyUserSev].soft : '#FFF5F4';
+
+    // ★★ ฟีเจอร์ใหม่ #1 — โหมดอ่านผลลัพธ์ออกเสียง (เพื่อผู้สูงอายุที่อ่านตัวหนังสือเล็กไม่ไหว)
+    //    เสียง Neural จาก backend /api/tts (ฟังเป็นมนุษย์) + fallback เสียงเบราว์เซอร์
+    //    ทำงานเฉพาะบนเว็บ/PWA ไม่กระทบ native
+    const canSpeak = isSpeechSupported();
+    const buildSpeech = () => {
+        const isTH = currentLang === 'TH';
+        const parts = [];
+        // เกริ่นแบบผู้ช่วยพูดคุย (อุ่นขึ้น ฟังเป็นธรรมชาติ)
+        parts.push(isTH ? `นี่คือผลการสแกนของ ${product.name} นะคะ` : `Here's the scan result for ${product.name}.`);
+        if (allergyAlert?.hasMatch) {
+            (allergyAlert.matches || []).forEach((m) => {
+                const label = isTH ? m.labelTH : m.labelEN;
+                const sev = m.userSeverity ? USER_SEV_STYLE[m.userSeverity]?.[isTH ? 'th' : 'en'] : null;
+                if (sev) parts.push(isTH ? `ตรวจพบ ${label} ซึ่งคุณตั้งไว้ว่าแพ้${sev}` : `It contains ${label}, which you set as ${sev}`);
+                else parts.push(isTH ? `ตรวจพบ ${label}` : `It contains ${label}`);
+            });
+            parts.push(isTH ? 'แนะนำให้หลีกเลี่ยง และอ่านฉลากทุกครั้งก่อนรับประทานนะคะ' : 'I recommend avoiding it, and always read the label before eating.');
+        } else {
+            parts.push(isTH ? 'ไม่พบสารก่อภูมิแพ้ที่คุณตั้งไว้ค่ะ' : 'No allergens from your profile were found.');
+        }
+        if (product.sugar_g > 15) parts.push(isTH ? `แต่มีน้ำตาลค่อนข้างสูง ประมาณ ${Math.round(product.sugar_g)} กรัม` : `But sugar is quite high, about ${Math.round(product.sugar_g)} grams.`);
+        return parts.join(' ');
+    };
+    const speakResult = () => {
+        if (!canSpeak) return;
+        if (isSpeaking) { stopSpeech(); setIsSpeaking(false); return; }
+        setIsSpeaking(true);
+        speak(buildSpeech(), {
+            lang: currentLang,
+            onEnd: () => setIsSpeaking(false),
+            onError: () => setIsSpeaking(false),
+        });
+    };
 
     return (
         <View style={{ flex: 1, backgroundColor: '#FAFAFA' }}>
@@ -637,6 +711,22 @@ export default function Result() {
                         <Image source={{ uri: getProductImage() }} style={{ width: 200, height: 200, resizeMode: 'contain' }} />
                         <Text style={{ fontSize: 26, fontWeight: '900', color: '#1B5E37', textAlign: 'center', marginTop: 10 }}>{product.name}</Text>
                         <Text style={{ fontSize: 15, color: '#888', fontWeight: '700', marginTop: 5 }}>{product.brand}</Text>
+                        {/* ★★ ฟีเจอร์ใหม่ #1 — ปุ่มอ่านผลลัพธ์ออกเสียง (แสดงเฉพาะเมื่อเบราว์เซอร์รองรับ) */}
+                        {canSpeak && (
+                            <Pressable onPress={speakResult} style={[s.speakBtn, isSpeaking && s.speakBtnActive]}>
+                                <View style={[s.speakIcon, isSpeaking && { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                                    <Icon icon={isSpeaking ? 'mdi:stop' : 'mdi:volume-high'} width={19} color={isSpeaking ? 'white' : '#1B5E37'} />
+                                </View>
+                                <View>
+                                    <Text style={{ fontSize: 14.5, fontWeight: '900', color: isSpeaking ? 'white' : '#1B5E37' }}>
+                                        {isSpeaking ? (currentLang === 'TH' ? 'กำลังอ่าน...' : 'Reading...') : (currentLang === 'TH' ? 'ฟังผลลัพธ์' : 'Listen to result')}
+                                    </Text>
+                                    <Text style={{ fontSize: 10.5, fontWeight: '700', color: isSpeaking ? 'rgba(255,255,255,0.85)' : '#7CB342', marginTop: 1 }}>
+                                        {isSpeaking ? (currentLang === 'TH' ? 'แตะเพื่อหยุด' : 'tap to stop') : (currentLang === 'TH' ? 'อ่านออกเสียงให้ฟัง' : 'read aloud')}
+                                    </Text>
+                                </View>
+                            </Pressable>
+                        )}
                     </View>
                 </LinearGradient>
 
@@ -657,24 +747,62 @@ export default function Result() {
                 {/* Allergen warning card */}
                 {isDangerous && allergyAlert && (
                     <View style={{ paddingHorizontal: 25, paddingBottom: 16 }}>
-                        <View style={[s.allergenCard, { borderColor: allergyBaseSev === 'critical' ? '#D32F2F' : '#E53935' }]}>
-                            <View style={[s.allergenBar, { backgroundColor: allergyBaseSev === 'critical' ? '#D32F2F' : '#E53935' }]}>
+                        <View style={[s.allergenCard, { borderColor: baseHeadColor }]}>
+                            {/* Layer 1 — เสียงของระบบ: หัวกล่องยึด base severity เสมอ */}
+                            <View style={[s.allergenBar, { backgroundColor: baseHeadColor }]}>
                                 <View style={s.allergenBarIcon}><Icon icon="mdi:exclamation" width={20} color="white" /></View>
                                 <View style={{ flex: 1 }}>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><Icon icon="mdi:shield-half-full" width={12} color="white" /><Text style={{ fontSize: 10, fontWeight: '700', color: 'white', opacity: 0.9 }}>{currentLang === 'TH' ? 'ประเมินโดยระบบ' : 'System assessment'}</Text></View>
-                                    <Text style={{ fontSize: 15, fontWeight: '900', color: 'white' }}>{allergyBaseSev === 'critical' ? (currentLang === 'TH' ? 'สารนี้จัดอยู่ในกลุ่มอันตรายร้ายแรง' : 'Critical-risk allergen') : (currentLang === 'TH' ? 'สารนี้จัดอยู่ในกลุ่มอันตรายสูง' : 'High-risk allergen')}</Text>
+                                    <Text style={{ fontSize: 15, fontWeight: '900', color: 'white' }}>{allergyBaseSev === 'critical' ? (currentLang === 'TH' ? 'สารนี้จัดอยู่ในกลุ่มอันตรายร้ายแรง' : 'Critical-risk allergen') : allergyBaseSev === 'high' ? (currentLang === 'TH' ? 'สารนี้จัดอยู่ในกลุ่มอันตรายสูง' : 'High-risk allergen') : (currentLang === 'TH' ? 'สารนี้อาจทำให้แพ้ได้' : 'This may cause a reaction')}</Text>
                                 </View>
                             </View>
-                            <View style={{ padding: 14, backgroundColor: '#FFF5F4' }}>
+                            {/* ★ เตือนเพราะผู้ใช้ตั้งเอง — ระบุเหตุผลให้ชัด ไม่ยืมปากระบบ */}
+                            {allergyUserDriven && (
+                                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, backgroundColor: '#D32F2F', paddingVertical: 8, paddingHorizontal: 12 }}>
+                                    <Icon icon="mdi:account-alert" width={14} color="white" />
+                                    <Text style={{ flex: 1, color: 'white', fontSize: 11, fontWeight: '800', lineHeight: 15.5 }}>
+                                        {currentLang === 'TH' ? 'แจ้งเตือนนี้เกิดจากระดับที่คุณตั้งเอง — ระบบไม่ได้จัดสารนี้เป็นกลุ่มอันตรายสูง' : 'This alert comes from your own setting — the system does not class this as high-risk'}
+                                    </Text>
+                                </View>
+                            )}
+                            {/* Layer 2 — เสียงของผู้ใช้: พื้นข้างในยึดระดับที่ผู้ใช้ตั้งสูงสุด */}
+                            <View style={{ padding: 14, backgroundColor: innerBg }}>
                                 <Text style={{ fontSize: 14, fontWeight: '900', color: '#1B1B1B' }}>
-                                    {currentLang === 'TH' ? `พบ ${allergyAlert.matches.map((m) => m.labelTH).join(', ')}` : `Contains ${allergyAlert.matches.map((m) => m.labelEN).join(', ')}`}
+                                    {currentLang === 'TH' ? `พบสารที่คุณแพ้ ${allergyAlert.matches.length} รายการ` : `Contains ${allergyAlert.matches.length} allergen${allergyAlert.matches.length > 1 ? 's' : ''} you react to`}
                                 </Text>
-                                {allergyUserSev && (
-                                    <View style={s.userSevChip}><Icon icon="mdi:account" width={12} color="#777" /><Text style={{ fontSize: 11, fontWeight: '800', color: '#555' }}>{currentLang === 'TH' ? `คุณตั้งไว้: ${userSevLabelTH[allergyUserSev]}` : `You set: ${allergyUserSev}`}</Text></View>
-                                )}
-                                <Pressable onPress={() => setShowAllergyModal(true)} style={[s.allergenBtn, { backgroundColor: allergyBaseSev === 'critical' ? '#D32F2F' : '#E53935' }]}>
+
+                                {/* ★ ชิปรายสาร — แต่ละตัวมีสี/กรอบตามระดับ "ของตัวเอง" */}
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                                    {allergyAlert.matches.map((m) => {
+                                        const isUserSet = !!m.userSeverity;
+                                        const st = isUserSet
+                                            ? USER_SEV_STYLE[m.userSeverity]
+                                            : (BASE_SEV_STYLE[m.baseSeverity] || BASE_SEV_STYLE.medium);
+                                        return (
+                                            <View key={m.allergenId} style={{ maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: st.bg, borderWidth: 1.5, borderColor: st.border, borderRadius: 10, paddingVertical: 5, paddingHorizontal: 9 }}>
+                                                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: st.dot }} />
+                                                {/* ชื่อยาว (เช่น "ถั่วเปลือกแข็ง (อัลมอนด์ วอลนัท ...)") ต้องตัดบรรทัดในชิป ไม่ล้นขอบการ์ด */}
+                                                <Text style={{ flexShrink: 1, fontSize: 12, fontWeight: '800', color: '#1B1B1B' }}>{currentLang === 'TH' ? m.labelTH : m.labelEN}</Text>
+                                                <Text style={{ flexShrink: 0, fontSize: 10.5, fontWeight: '900', color: st.fg }}>{currentLang === 'TH' ? st.th : st.en}</Text>
+                                                {isUserSet && <Icon icon="mdi:account-check" width={11} color={st.fg} />}
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+
+                                <Pressable onPress={() => setShowAllergyModal(true)} style={[s.allergenBtn, { backgroundColor: baseHeadColor }]}>
                                     <Icon icon="mdi:information-outline" width={16} color="white" /><Text style={{ color: 'white', fontWeight: '900', fontSize: 13 }}>{currentLang === 'TH' ? 'ดูรายละเอียดและคำเตือน' : 'View details & warning'}</Text>
                                 </Pressable>
+
+                                {/* ★ กำกับเสมอ — ระบุชัดว่าระดับที่เห็นเป็นค่าที่ผู้ใช้ตั้งเอง */}
+                                <View style={{ flexDirection: 'row', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.08)' }}>
+                                    <Icon icon="mdi:account-cog-outline" width={13} color="#8A8A8A" />
+                                    <Text style={{ flex: 1, fontSize: 10, lineHeight: 14.5, fontWeight: '600', color: '#8A8A8A' }}>
+                                        {currentLang === 'TH'
+                                            ? `ป้าย “รุนแรง / ปานกลาง / เล็กน้อย” เป็นระดับที่คุณตั้งเองในโปรไฟล์ ${allergyAlert.matches.some((m) => !m.userSeverity) ? '(สารที่ขึ้น “ระบบ: …” คือยังไม่ได้ตั้ง จึงใช้ค่ามาตรฐานของระบบ) ' : ''}ส่วนแถบสีด้านบนเป็นการประเมินโดยระบบตามมาตรฐานสากล — ความเสี่ยงจริงอาจต่างออกไป หากไม่แน่ใจโปรดปรึกษาแพทย์`
+                                            : `“Severe / Medium / Mild” labels are levels you set in your profile${allergyAlert.matches.some((m) => !m.userSeverity) ? ' (items marked “System: …” are not set yet, so the standard level applies)' : ''}. The top bar is the system’s assessment per international standards — actual risk may differ. Consult a doctor if unsure.`}
+                                    </Text>
+                                </View>
                             </View>
                         </View>
                     </View>
@@ -789,7 +917,6 @@ const s = StyleSheet.create({
     allergenCard: { backgroundColor: 'white', borderRadius: 22, borderWidth: 2, overflow: 'hidden' },
     allergenBar: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
     allergenBarIcon: { width: 34, height: 34, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
-    userSevChip: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8, backgroundColor: 'white', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
     allergenBtn: { width: '100%', marginTop: 12, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
     summaryCard: { backgroundColor: 'white', borderRadius: 32, padding: 24, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 40, shadowOffset: { width: 0, height: 12 }, elevation: 3 },
     summaryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
@@ -797,6 +924,14 @@ const s = StyleSheet.create({
     aiBox: { backgroundColor: 'white', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#F0F0F0', borderLeftWidth: 4, marginTop: 16 },
     vipInsight: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#1B5E37', paddingVertical: 2, paddingHorizontal: 8, borderRadius: 10 },
     macroCard: { backgroundColor: 'white', borderRadius: 32, padding: 24, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 40, shadowOffset: { width: 0, height: 12 }, elevation: 2 },
+    speakBtn: { marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 11, backgroundColor: 'white', borderRadius: 999, paddingVertical: 8, paddingLeft: 8, paddingRight: 22, shadowColor: '#1B5E37', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
+    speakBtnActive: { backgroundColor: '#1B5E37' },
+    speakIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#EDF6E1', alignItems: 'center', justifyContent: 'center' },
+    burnRow: { marginTop: 18, backgroundColor: '#F6FBEF', borderWidth: 1.5, borderColor: '#E4F0C8', borderRadius: 20, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 },
+    burnIcon: { width: 46, height: 46, borderRadius: 15, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center' },
+    burnLabel: { fontSize: 11.5, fontWeight: '700', color: '#7CB342' },
+    burnMain: { fontSize: 15, fontWeight: '800', color: '#33691E', marginTop: 1 },
+    burnHi: { color: '#EF6C00', fontWeight: '900', fontSize: 18 },
     ringCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
     nutLabel: { fontSize: 12, color: '#888', fontWeight: '700', marginBottom: 4 },
     nutVal: { fontSize: 20, fontWeight: '900', color: '#333' },

@@ -71,6 +71,13 @@ export default function Quiz() {
         navigate('/login');
     };
 
+    // ผู้ใช้เดิมข้าม quiz ได้เลย — ต้องล้าง temp_* ไม่งั้นหน้า Login จะเปิดโหมด "สมัครสมาชิก" แทน
+    const goToLogin = () => {
+        storage.removeItem('temp_persona');
+        storage.removeItem('temp_health_profile');
+        navigate('/login');
+    };
+
     const OptionButton = ({ icon, textStr, type }) => (
         <Pressable onPress={() => handleAnswer(type)} style={styles.optionBtn}>
             <View style={styles.optionIconBox}><Icon icon={icon} width={28} color="#1B5E37" /></View>
@@ -151,6 +158,13 @@ export default function Quiz() {
                             <Text style={styles.welcomeSub}>{t.qTitle1}{'\n'}{t.qTitle2}</Text>
                             <Pressable onPress={() => setStep(1)} style={styles.ctaPill}>
                                 <Text style={styles.ctaPillText}>{t.qBtn}</Text>
+                            </Pressable>
+                            {/* ★ ทางลัดสำหรับคนที่มีบัญชีอยู่แล้ว — ไม่ต้องตอบ quiz ซ้ำ (สไตล์เดียวกับปุ่มสลับโหมดในหน้า Login) */}
+                            <Pressable onPress={goToLogin} style={styles.loginLink}>
+                                <Text style={styles.loginLinkText}>
+                                    {t.haveAccount || 'มีบัญชีอยู่แล้ว? '}
+                                    <Text style={styles.loginLinkStrong}>{t.signIn || 'เข้าสู่ระบบ'}</Text>
+                                </Text>
                             </Pressable>
                         </View>
                     )}
@@ -257,6 +271,9 @@ const styles = StyleSheet.create({
     welcomeSub: { color: '#558B2F', textAlign: 'center', marginBottom: 60, fontSize: 18, lineHeight: 28, fontWeight: '600' },
     ctaPill: { paddingVertical: 22, paddingHorizontal: 70, backgroundColor: '#D5EE7A', borderRadius: 50, shadowColor: '#B4DC00', shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 15 }, elevation: 6 },
     ctaPillText: { color: '#1B5E37', fontSize: 18, fontWeight: '800' },
+    loginLink: { marginTop: 22, alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 12 },
+    loginLinkText: { fontSize: 14, color: '#888', fontWeight: '600' },
+    loginLinkStrong: { color: '#1B5E37', fontWeight: '800' },
     backBtn: { backgroundColor: 'white', borderRadius: 16, width: 48, height: 48, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 15, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
     progressRow: { width: '100%', flexDirection: 'row', gap: 8, marginBottom: 40, paddingHorizontal: 5 },
     progressSeg: { height: 8, flex: 1, borderRadius: 10 },

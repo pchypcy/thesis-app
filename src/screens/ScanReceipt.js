@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, ScrollView, Image, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { View, ScrollView, Image, StyleSheet, ActivityIndicator, Alert, Platform } from "react-native";
 import { Pressable } from "../components/Touchable";
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
@@ -54,17 +54,47 @@ export default function ScanReceipt() {
     };
 
     const pickImage = async (fromCamera) => {
-        const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) { toast.error(isTH ? 'ไม่ได้รับสิทธิ์' : 'Permission denied'); return; }
+        // บนเว็บ: ตัวเลือกไฟล์ไม่ต้องขอ permission (native เท่านั้นที่ต้องขอ)
+        if (Platform.OS !== 'web') {
+            const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!perm.granted) { toast.error(isTH ? 'ไม่ได้รับสิทธิ์' : 'Permission denied'); return; }
+        }
         const opts = { mediaTypes: ['images'], quality: 0.6, base64: true };
-        const res = fromCamera ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
-        if (!res.canceled && res.assets?.[0]?.base64) { setPreview(res.assets[0].uri); performScan(res.assets[0].base64); }
+        let res;
+        try {
+            res = fromCamera && Platform.OS !== 'web'
+                ? await ImagePicker.launchCameraAsync(opts)
+                : await ImagePicker.launchImageLibraryAsync(opts);
+        } catch (e) { toast.error(isTH ? 'เปิดรูปไม่สำเร็จ' : 'Could not open picker'); return; }
+        if (res.canceled || !res.assets?.[0]) return;
+
+        const asset = res.assets[0];
+        setPreview(asset.uri);
+        let b64 = asset.base64;
+        // web fallback: บางเบราว์เซอร์ไม่คืน base64 → อ่านเองจาก uri
+        if (!b64 && asset.uri) {
+            try {
+                const blob = await (await fetch(asset.uri)).blob();
+                b64 = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onloadend = () => resolve(String(r.result).split(',')[1] || '');
+                    r.onerror = reject;
+                    r.readAsDataURL(blob);
+                });
+            } catch {}
+        }
+        if (b64) performScan(b64);
+        else toast.error(isTH ? 'อ่านรูปไม่สำเร็จ ลองใหม่' : 'Could not read image');
     };
-    const choosePhoto = () => Alert.alert(isTH ? 'เลือกหรือถ่ายภาพ' : 'Choose or take photo', '', [
-        { text: isTH ? 'ถ่ายรูป' : 'Camera', onPress: () => pickImage(true) },
-        { text: isTH ? 'เลือกจากคลัง' : 'Gallery', onPress: () => pickImage(false) },
-        { text: isTH ? 'ยกเลิก' : 'Cancel', style: 'cancel' },
-    ]);
+    // บนเว็บ Alert หลายปุ่มไม่ทำงาน → เปิดตัวเลือกไฟล์ตรงๆ (มือถือจะมีถ่ายรูป/คลังให้เลือกเอง)
+    const choosePhoto = () => {
+        if (Platform.OS === 'web') { pickImage(false); return; }
+        Alert.alert(isTH ? 'เลือกหรือถ่ายภาพ' : 'Choose or take photo', '', [
+            { text: isTH ? 'ถ่ายรูป' : 'Camera', onPress: () => pickImage(true) },
+            { text: isTH ? 'เลือกจากคลัง' : 'Gallery', onPress: () => pickImage(false) },
+            { text: isTH ? 'ยกเลิก' : 'Cancel', style: 'cancel' },
+        ]);
+    };
 
     const reset = () => { setResult(null); setError(null); setPreview(null); };
 
