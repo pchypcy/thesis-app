@@ -14,6 +14,28 @@ import { storage } from '../utils/storage';
 import { getCurrentLang } from '../utils/language';
 import VIPUpgradeSheet from '../components/VIPUpgradeSheet';
 
+// ย่อรูปบนเว็บด้วย canvas ก่อนอัปโหลด (รูปมือถือหลาย MB → ~200-400KB) กัน timeout บนเน็ตมือถือ
+async function downscaleWeb(uri, maxDim = 1600, quality = 0.6) {
+    return new Promise((resolve) => {
+        try {
+            const img = new window.Image();
+            img.onload = () => {
+                try {
+                    let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+                    const scale = Math.min(1, maxDim / Math.max(w, h));
+                    w = Math.round(w * scale); h = Math.round(h * scale);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    resolve((canvas.toDataURL('image/jpeg', quality).split(',')[1]) || null);
+                } catch { resolve(null); }
+            };
+            img.onerror = () => resolve(null);
+            img.src = uri;
+        } catch { resolve(null); }
+    });
+}
+
 export default function ScanReceipt() {
     const navigate = useNavigate();
     const username = storage.getItem('username');
@@ -44,7 +66,7 @@ export default function ScanReceipt() {
     const performScan = async (base64) => {
         setScanning(true); setError(null); setResult(null);
         try {
-            const res = await axios.post(`${API_BASE_URL}/api/ai-scan/receipt`, { username, imageBase64: `data:image/jpeg;base64,${base64}`, mimeType: 'image/jpeg' }, { headers: H, timeout: 30000 });
+            const res = await axios.post(`${API_BASE_URL}/api/ai-scan/receipt`, { username, imageBase64: `data:image/jpeg;base64,${base64}`, mimeType: 'image/jpeg' }, { headers: H, timeout: 60000 });
             if (res.data?.success) { setResult(res.data); setQuota((q) => ({ ...q, used: res.data.quota.used, remaining: res.data.quota.remaining })); }
         } catch (e) {
             const d = e.response?.data;
@@ -70,7 +92,12 @@ export default function ScanReceipt() {
 
         const asset = res.assets[0];
         setPreview(asset.uri);
-        let b64 = asset.base64;
+        let b64 = null;
+        // web: ย่อรูปก่อนส่ง (ลดขนาดอัปโหลด กัน timeout บนเน็ตมือถือ)
+        if (Platform.OS === 'web' && asset.uri) {
+            b64 = await downscaleWeb(asset.uri, 1600, 0.6);
+        }
+        if (!b64) b64 = asset.base64;
         // web fallback: บางเบราว์เซอร์ไม่คืน base64 → อ่านเองจาก uri
         if (!b64 && asset.uri) {
             try {
