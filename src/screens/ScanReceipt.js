@@ -65,14 +65,28 @@ export default function ScanReceipt() {
 
     const performScan = async (base64) => {
         setScanning(true); setError(null); setResult(null);
-        try {
-            const res = await axios.post(`${API_BASE_URL}/api/ai-scan/receipt`, { username, imageBase64: `data:image/jpeg;base64,${base64}`, mimeType: 'image/jpeg' }, { headers: H, timeout: 60000 });
-            if (res.data?.success) { setResult(res.data); setQuota((q) => ({ ...q, used: res.data.quota.used, remaining: res.data.quota.remaining })); }
-        } catch (e) {
-            const d = e.response?.data;
-            if (d?.quotaExceeded) setError({ type: 'quota', ...d });
-            else setError({ type: 'generic', message: d?.message || e.message });
-        } finally { setScanning(false); }
+        const body = { username, imageBase64: `data:image/jpeg;base64,${base64}`, mimeType: 'image/jpeg' };
+        let lastErr = null;
+        // ลองสูงสุด 2 ครั้ง (กันเน็ตมือถือสะดุด) — backend การันตีว่ามีผลลัพธ์เสมอ
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const res = await axios.post(`${API_BASE_URL}/api/ai-scan/receipt`, body, { headers: H, timeout: 90000 });
+                if (res.data?.success) {
+                    setResult(res.data);
+                    setQuota((q) => ({ ...q, used: res.data.quota.used, remaining: res.data.quota.remaining }));
+                    setScanning(false);
+                    return;
+                }
+                lastErr = { type: 'generic', message: res.data?.message || 'unknown' };
+            } catch (e) {
+                const d = e.response?.data;
+                if (d?.quotaExceeded) { setError({ type: 'quota', ...d }); setScanning(false); return; } // โควตาหมด — ไม่ต้อง retry
+                lastErr = { type: 'generic', message: d?.message || e.message };
+            }
+            if (attempt < 2) await new Promise((r) => setTimeout(r, 800));
+        }
+        setError(lastErr);
+        setScanning(false);
     };
 
     const pickImage = async (fromCamera) => {
