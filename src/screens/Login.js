@@ -10,6 +10,7 @@ import { API_BASE_URL } from '../config';
 import { storage } from '../utils/storage';
 import { getCurrentLang, translations } from '../utils/language';
 import { setToken } from '../utils/api';
+import GoogleSignInButton, { isGoogleSignInAvailable } from '../components/GoogleSignInButton';
 import { theme } from '../utils/theme';
 
 export default function Login() {
@@ -69,33 +70,22 @@ export default function Login() {
         navigate('/home');
     };
 
-    // เข้าสู่ระบบ/สมัครด้วย Google หรือ Apple
-    //   - มีบัญชี social อยู่แล้ว → login; ยังไม่มี → create จาก identity ของ provider
-    //   - identity จริงมาจาก OAuth ของ provider (เดโมนี้ใช้บัญชี demo ต่อ provider)
-    const handleSocialAuth = async (provider) => {
-        if (socialLoading || isLoading) return;
+    // เข้าสู่ระบบ/สมัครด้วย Google (ของจริง)
+    //   Google ส่ง ID token มาให้หลังผู้ใช้เลือกบัญชี → backend ตรวจลายเซ็นกับ Google
+    //   แล้ว login บัญชีเดิม / ผูกกับบัญชีอีเมลเดียวกัน / สร้างบัญชีใหม่ พร้อมข้อมูลสุขภาพจาก Quiz
+    const handleGoogleCredential = async (credential) => {
+        if (socialLoading || isLoading || !credential) return;
         setErrorMessage('');
-        setSocialLoading(provider);
-        const H = { headers: { 'ngrok-skip-browser-warning': 'true' } };
-        const username = `${provider}_demo`;
-        const password = `${provider}_demo_2026`;
+        setSocialLoading('google');
         try {
-            let data;
-            try {
-                const r = await axios.post(`${API_BASE_URL}/api/users/login`, { username, password }, H);
-                data = r.data;
-            } catch (e) {
-                const r = await axios.post(`${API_BASE_URL}/api/users/create`, {
-                    username, password,
-                    email: `${username}@${provider === 'google' ? 'gmail.com' : 'privaterelay.appleid.com'}`,
-                    persona: tempPersona || 'New User',
-                    has_diabetes: healthProfile.diabetes || false,
-                    has_kidney_disease: healthProfile.kidney_disease || false,
-                    allergies: healthProfile.allergies || [],
-                }, H);
-                data = r.data;
-            }
-            await finishAuth(data, username);
+            const r = await axios.post(`${API_BASE_URL}/api/users/google`, {
+                credential,
+                persona: tempPersona || 'New User',
+                has_diabetes: healthProfile.diabetes || false,
+                has_kidney_disease: healthProfile.kidney_disease || false,
+                allergies: healthProfile.allergies || [],
+            }, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+            await finishAuth(r.data, r.data?.username);
         } catch (err) {
             setErrorMessage(err.response?.data?.message || (t.loginFailed || 'เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่'));
         } finally {
@@ -243,22 +233,25 @@ export default function Login() {
                         </Pressable>
                     </View>
 
-                    <View style={styles.divider}>
-                        <View style={styles.dividerLine} />
-                        <Text style={styles.dividerText}>{t.orContinueWith || 'หรือเข้าสู่ระบบด้วย'}</Text>
-                        <View style={styles.dividerLine} />
-                    </View>
+                    {isGoogleSignInAvailable && (
+                        <>
+                            <View style={styles.divider}>
+                                <View style={styles.dividerLine} />
+                                <Text style={styles.dividerText}>{t.orContinueWith || 'หรือเข้าสู่ระบบด้วย'}</Text>
+                                <View style={styles.dividerLine} />
+                            </View>
 
-                    <View style={{ gap: 12 }}>
-                        <Pressable onPress={() => handleSocialAuth('google')} disabled={!!socialLoading || isLoading} style={[styles.socialBtnFull, { opacity: (socialLoading && socialLoading !== 'google') ? 0.6 : 1 }]}>
-                            {socialLoading === 'google' ? <ActivityIndicator color="#1B5E37" /> : <Icon icon="logos:google-icon" width={22} />}
-                            <Text style={styles.socialBtnText}>{t.continueGoogle || 'ดำเนินการต่อด้วย Google'}</Text>
-                        </Pressable>
-                        <Pressable onPress={() => handleSocialAuth('apple')} disabled={!!socialLoading || isLoading} style={[styles.socialBtnFull, styles.appleBtn, { opacity: (socialLoading && socialLoading !== 'apple') ? 0.6 : 1 }]}>
-                            {socialLoading === 'apple' ? <ActivityIndicator color="#fff" /> : <Icon icon="mdi:apple" width={22} color="#fff" />}
-                            <Text style={[styles.socialBtnText, { color: '#fff' }]}>{t.continueApple || 'ดำเนินการต่อด้วย Apple'}</Text>
-                        </Pressable>
-                    </View>
+                            <View style={{ gap: 12, alignItems: 'center' }}>
+                                <GoogleSignInButton
+                                    onCredential={handleGoogleCredential}
+                                    onError={() => setErrorMessage(t.googleLoadFailed || 'โหลดปุ่ม Google ไม่สำเร็จ กรุณาลองใหม่')}
+                                    disabled={!!socialLoading || isLoading}
+                                    locale={currentLang === 'TH' ? 'th' : 'en'}
+                                />
+                                {socialLoading === 'google' && <ActivityIndicator color="#1B5E37" />}
+                            </View>
+                        </>
+                    )}
 
                     <Pressable onPress={() => { setIsLoginMode(!isLoginMode); setErrorMessage(''); }} style={{ marginTop: 22, alignSelf: 'center' }}>
                         <Text style={styles.toggleText}>
@@ -300,9 +293,6 @@ const styles = StyleSheet.create({
     divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 30, gap: 12 },
     dividerLine: { flex: 1, height: 2, backgroundColor: '#F0F0F0' },
     dividerText: { color: '#BDBDBD', fontSize: 14, fontWeight: '600' },
-    socialBtnFull: { width: '100%', paddingVertical: 16, backgroundColor: '#fff', borderWidth: 2, borderColor: '#EBEBEB', borderRadius: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
-    appleBtn: { backgroundColor: '#111', borderColor: '#111' },
-    socialBtnText: { fontSize: 16, fontWeight: '700', color: '#333' },
     toggleText: { fontSize: 14, color: '#888', fontWeight: '600' },
     toggleLink: { color: '#1B5E37', fontWeight: '800' },
 });
