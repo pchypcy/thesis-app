@@ -90,6 +90,7 @@ export default function App() {
                 key={lang}
                 initialState={navStateRef.current}
                 onStateChange={(state) => { navStateRef.current = state; }}
+                documentTitle={{ formatter: () => 'InGreen' }}  // ชื่อแท็บเบราว์เซอร์เป็น InGreen ทุกหน้า (เว็บ)
             >
                 <Stack.Navigator
                     initialRouteName="Quiz"
